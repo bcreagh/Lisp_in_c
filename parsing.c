@@ -99,6 +99,7 @@ lval* builtin_add(lenv* e, lval* a);
 lval* builtin_sub(lenv* e, lval* a);
 lval* builtin_mul(lenv* e, lval* a);
 lval* builtin_div(lenv* e, lval* a);
+lval* builtin_lenv_print(lenv* e, lval* a);
 
 /* declare lval methods */
 lval* lval_num(long x);
@@ -411,6 +412,16 @@ lval* builtin_exit(lenv* e, lval* a) {
     return lval_exit();
 }
 
+lval* builtin_lenv_print(lenv* e, lval* a) {
+    for(int i = 0; i < e->count; i++) {
+        printf("%s: ", e->syms[i]);
+        lval_println(e->vals[i]);
+        
+    }
+    lval_del(a);
+    return lval_sexpr();
+}
+
 /* create a new number type lval */
 lval* lval_num(long x) {
     lval* v = malloc(sizeof(lval));
@@ -693,6 +704,7 @@ void lenv_add_builtins(lenv* e) {
     
     /* other */
     lenv_add_builtin(e, "exit", builtin_exit);
+    lenv_add_builtin(e, "print_env", builtin_lenv_print);
 }
 
 /* construct a new lenv */
