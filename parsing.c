@@ -60,7 +60,7 @@ typedef struct lenv lenv;
 
 /* enum of possible lval types */
 enum { LVAL_NUM, LVAL_ERR, LVAL_SYM, LVAL_SEXPR,
-    LVAL_FUN, LVAL_QEXPR };
+    LVAL_FUN, LVAL_QEXPR, LVAL_EXIT };
     
 typedef lval*(*lbuiltin)(lenv*, lval*);
 
@@ -107,6 +107,7 @@ lval* lval_sym(char* s);
 lval* lval_sexpr(void);
 lval* lval_qexpr(void);
 lval* lval_fun(lbuiltin func);
+lval* lval_exit();
 lval* lval_read_num(mpc_ast_t* t);
 lval* lval_read(mpc_ast_t* t);
 lval* lval_add(lval* v, lval* x);
@@ -175,10 +176,20 @@ int main(int argc, char** argv) {
         if (mpc_parse("<stdin>", input, Lispy, &r)) {
             /*parse successful */
             lval* x = lval_eval(e, lval_read(r.output));
+            
             lval_println(x);
+            
+            if(x->type == LVAL_EXIT){
+                lval_del(x);
+                mpc_ast_delete(r.output);
+                free(input);
+                break;
+            }
             lval_del(x);
             
             mpc_ast_delete(r.output);
+            
+            
         } else {
             /* Parse unsuccessful */
             mpc_err_print(r.error);
@@ -187,6 +198,7 @@ int main(int argc, char** argv) {
         
         
         free(input);
+        
     }
     
     lenv_del(e);
@@ -217,6 +229,11 @@ lval* lval_eval_sexpr(lenv* e, lval* v) {
     
     /* Ensure first element is a function after evaluation */
     lval* f = lval_pop(v, 0);
+    if(f->type == LVAL_EXIT) {
+        lval_del(f);
+        lval_del(v);
+        return lval_exit();
+    }
     if(f->type != LVAL_FUN) {
         lval_del(f);
         lval_del(v);
@@ -390,6 +407,10 @@ lval* builtin_div(lenv* e, lval* a) {
     return builtin_op(e, a, "/");
 }
 
+lval* builtin_exit(lenv* e, lval* a) {
+    return lval_exit();
+}
+
 /* create a new number type lval */
 lval* lval_num(long x) {
     lval* v = malloc(sizeof(lval));
@@ -453,6 +474,12 @@ lval* lval_fun(lbuiltin func) {
     lval* v = malloc(sizeof(lval));
     v->type = LVAL_FUN;
     v->fun = func;
+    return v;
+}
+
+lval* lval_exit() {
+    lval* v = malloc(sizeof(lval));
+    v->type = LVAL_EXIT;
     return v;
 }
 
@@ -612,6 +639,8 @@ void lval_print(lval* v) {
         case LVAL_QEXPR:
             lval_expr_print(v, '{', '}');
             break;
+        case LVAL_EXIT:
+            printf("Exit call... \n");
     }
 }
 
@@ -661,6 +690,9 @@ void lenv_add_builtins(lenv* e) {
     
     /* Variable functions */
     lenv_add_builtin(e, "def", builtin_def);
+    
+    /* other */
+    lenv_add_builtin(e, "exit", builtin_exit);
 }
 
 /* construct a new lenv */
@@ -721,6 +753,8 @@ void lenv_put(lenv* e, lval* k, lval* v) {
     e->syms[e->count-1] = malloc(strlen(k->sym+1));
     strcpy(e->syms[e->count-1], k->sym);
 }
+
+
 
 char* ltype_name(int t) {
     switch(t) {
