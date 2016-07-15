@@ -58,6 +58,16 @@ struct lenv;
 typedef struct lval lval;
 typedef struct lenv lenv;
 
+/* forward declare parsers */
+mpc_parser_t* Number; 
+mpc_parser_t* Symbol; 
+mpc_parser_t* String; 
+mpc_parser_t* Comment;
+mpc_parser_t* Sexpr;  
+mpc_parser_t* Qexpr;  
+mpc_parser_t* Expr; 
+mpc_parser_t* Lispy;
+
 /* enum of possible lval types */
 enum { LVAL_NUM, LVAL_ERR, LVAL_SYM, LVAL_STR,
     LVAL_SEXPR, LVAL_FUN, LVAL_QEXPR, LVAL_EXIT };
@@ -121,6 +131,9 @@ lval* builtin_le(lenv* e, lval* a);
 lval* builtin_eq(lenv* e, lval* a);
 lval* builtin_ne(lenv* e, lval* a);
 lval* builtin_if(lenv* e, lval* a);
+lval* builtin_load(lenv* e, lval* a);
+lval* builtin_print(lenv* e, lval* a);
+lval* builtin_error(lenv* e, lval* a);
 
 
 /* declare lval methods */
@@ -163,18 +176,19 @@ lenv* lenv_copy(lenv* e);
 char* ltype_name(int t);
 
 
+
 int main(int argc, char** argv) {
     
     /* set up our grammer */
     /*create our parsers */
-    mpc_parser_t* Number = mpc_new("number");
-    mpc_parser_t* Symbol = mpc_new("symbol");
-    mpc_parser_t* String = mpc_new("string");
-    mpc_parser_t* Comment = mpc_new("comment");
-    mpc_parser_t* Sexpr = mpc_new("sexpr");
-    mpc_parser_t* Qexpr = mpc_new("qexpr");
-    mpc_parser_t* Expr = mpc_new("expr");
-    mpc_parser_t* Lispy = mpc_new("lispy");
+    Number = mpc_new("number");
+    Symbol = mpc_new("symbol");
+    String = mpc_new("string");
+    Comment = mpc_new("comment");
+    Sexpr = mpc_new("sexpr");
+    Qexpr = mpc_new("qexpr");
+    Expr = mpc_new("expr");
+    Lispy = mpc_new("lispy");
     
     /* define the language */
     mpca_lang(MPCA_LANG_DEFAULT,
@@ -198,43 +212,63 @@ int main(int argc, char** argv) {
     lenv* e = lenv_new();
     lenv_add_builtins(e);
     
-    /* In a never ending loop */
-    while(1) {
-        
-        
-        
-        /* now the readline function will work on both operating systems*/
-        char* input = readline("lispy> ");
-        add_history(input);
-        
-        /* parse input */
-        mpc_result_t r;
-        if (mpc_parse("<stdin>", input, Lispy, &r)) {
-            /*parse successful */
-            lval* x = lval_eval(e, lval_read(r.output));
+    if(argc == 1) {
+    
+        /* In a never ending loop */
+        while(1) {
             
-            lval_println(x);
             
-            if(x->type == LVAL_EXIT){
+            /* now the readline function will work on both operating systems*/
+            char* input = readline("lispy> ");
+            add_history(input);
+            
+            /* parse input */
+            mpc_result_t r;
+            if (mpc_parse("<stdin>", input, Lispy, &r)) {
+                /*parse successful */
+                lval* x = lval_eval(e, lval_read(r.output));
+                
+                lval_println(x);
+                
+                if(x->type == LVAL_EXIT){
+                    lval_del(x);
+                    mpc_ast_delete(r.output);
+                    free(input);
+                    break;
+                }
                 lval_del(x);
+                
                 mpc_ast_delete(r.output);
-                free(input);
-                break;
+                
+                
+            } else {
+                /* Parse unsuccessful */
+                mpc_err_print(r.error);
+                mpc_err_delete(r.error);
             }
-            lval_del(x);
-            
-            mpc_ast_delete(r.output);
             
             
-        } else {
-            /* Parse unsuccessful */
-            mpc_err_print(r.error);
-            mpc_err_delete(r.error);
+            free(input);
+            
         }
-        
-        
-        free(input);
-        
+    }
+    
+    /* if supplied with a list of files */
+    if (argc >= 2) {
+  
+        /* loop over each supplied filename (starting from 1) */
+        for (int i = 1; i < argc; i++) {
+          
+            /* Argument list with a single argument, the filename */
+            lval* args = lval_add(lval_sexpr(), lval_str(argv[i]));
+          
+            /* Pass to builtin load and get the result */
+            lval* x = builtin_load(e, args);
+          
+            /* If the result is an error be sure to print it */
+            if (x->type == LVAL_ERR) { lval_println(x); }
+            lval_del(x);
+        }
     }
     
     lenv_del(e);
@@ -583,6 +617,73 @@ lval* builtin_if(lenv* e, lval* a) {
     return x;
 }
 
+/* loads and evaluates an external file */
+lval* builtin_load(lenv* e, lval* a){
+    LASSERT_NUM("load", a, 1);
+    LASSERT_TYPE("load", a, 0, LVAL_STR);
+    
+    /* parse file given by string name */
+    mpc_result_t r;
+    if(mpc_parse_contents(a->cell[0]->str, Lispy, &r)) {
+        /* read contents */
+        lval* expr = lval_read(r.output);
+        mpc_ast_delete(r.output);
+        
+        /* evaluate each expression */
+        while(expr->count) {
+            lval* x = lval_eval(e, lval_pop(expr, 0));
+            /* if evaluation leads to error print it */
+            if(x->type == LVAL_ERR) {
+                lval_println(x);
+            }
+            lval_del(x);
+        }
+        /* delete expressions and arguments */
+        lval_del(expr);
+        lval_del(a);
+        /* return empty list */
+        return lval_sexpr();
+    } else {
+        /* get parse error as string */
+        char* err_msg = mpc_err_string(r.error);
+        mpc_err_delete(r.error);
+        
+        /* create new error message using it */
+        lval* err = lval_err("Could not load Library %s", err_msg);
+        
+        /* clean up and return error */
+        free(err_msg);
+        lval_del(a);
+        return err;
+    }
+}
+
+lval* builtin_print(lenv* e, lval* a) {
+
+    /* Print each argument followed by a space */
+    for (int i = 0; i < a->count; i++) {
+        lval_print(a->cell[i]); putchar(' ');
+    }
+
+    /* Print a newline and delete arguments */
+    putchar('\n');
+    lval_del(a);
+
+    return lval_sexpr();
+}
+
+lval* builtin_error(lenv* e, lval* a) {
+    LASSERT_NUM("error", a, 1);
+    LASSERT_TYPE("error", a, 0, LVAL_STR);
+
+    /* Construct Error from first argument */
+    lval* err = lval_err(a->cell[0]->str);
+
+    /* Delete arguments and return */
+    lval_del(a);
+    return err;
+}
+
 /* create a new number type lval */
 lval* lval_num(long x) {
     lval* v = malloc(sizeof(lval));
@@ -842,6 +943,23 @@ lval* lval_call(lenv* e, lval* f, lval* a) {
 
         /* Pop the first symbol from the formals */
         lval* sym = lval_pop(f->formals, 0);
+        
+        /* Special Case to deal with '&' */
+        if (strcmp(sym->sym, "&") == 0) {
+          
+            /* Ensure '&' is followed by another symbol */
+            if (f->formals->count != 1) {
+                lval_del(a);
+                return lval_err("Function format invalid. "
+                    "Symbol '&' not followed by single symbol.");
+            }
+          
+            /* Next formal should be bound to remaining arguments */
+            lval* nsym = lval_pop(f->formals, 0);
+            lenv_put(f->env, nsym, builtin_list(e, a));
+            lval_del(sym); lval_del(nsym);
+            break;
+        }
 
         /* Pop the next argument from the list */
         lval* val = lval_pop(a, 0);
@@ -855,6 +973,28 @@ lval* lval_call(lenv* e, lval* f, lval* a) {
 
     /* Argument list is now bound so can be cleaned up */
     lval_del(a);
+    
+    /* If '&' remains in formal list bind to empty list */
+    if (f->formals->count > 0 &&
+        strcmp(f->formals->cell[0]->sym, "&") == 0) {
+        
+        /* Check to ensure that & is not passed invalidly. */
+        if (f->formals->count != 2) {
+            return lval_err("Function format invalid. "
+                "Symbol '&' not followed by single symbol.");
+        }
+        
+        /* Pop and delete '&' symbol */
+        lval_del(lval_pop(f->formals, 0));
+        
+        /* Pop next symbol and create empty list */
+        lval* sym = lval_pop(f->formals, 0);
+        lval* val = lval_qexpr();
+        
+        /* Bind to environment and delete */
+        lenv_put(f->env, sym, val);
+        lval_del(sym); lval_del(val);
+    }
 
     /* If all formals have been bound evaluate */
     if (f->formals->count == 0) {
@@ -1052,6 +1192,9 @@ void lenv_add_builtins(lenv* e) {
     /* other */
     lenv_add_builtin(e, "exit", builtin_exit);
     lenv_add_builtin(e, "print_env", builtin_lenv_print);
+    lenv_add_builtin(e, "load", builtin_load);
+    lenv_add_builtin(e, "print", builtin_print);
+    lenv_add_builtin(e, "error", builtin_error);
 }
 
 /* construct a new lenv */
