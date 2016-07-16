@@ -212,6 +212,13 @@ int main(int argc, char** argv) {
     lenv* e = lenv_new();
     lenv_add_builtins(e);
     
+    /* load standard library */
+    lval* libr = lval_add(lval_sexpr(), lval_str("stlib.lspy"));
+    lval* res = builtin_load(e, libr);
+    if (res->type == LVAL_ERR) { lval_println(res); }
+    lval_del(res);
+    lval_del(libr);
+    
     if(argc == 1) {
     
         /* In a never ending loop */
