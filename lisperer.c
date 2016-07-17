@@ -206,8 +206,8 @@ int main(int argc, char** argv) {
         Number, Symbol, String, Comment, Sexpr, Qexpr, Expr, Lispy);
 
     /* Print version and exit info */
-    puts("Lispy Version 0.0.0.1");
-    puts("Press Ctrl+c to exit\n");
+    puts("Lisperer Version 0.0.0.1");
+    puts("exit() to quit \n");
     
     lenv* e = lenv_new();
     lenv_add_builtins(e);
@@ -226,7 +226,7 @@ int main(int argc, char** argv) {
             
             
             /* now the readline function will work on both operating systems*/
-            char* input = readline("lispy> ");
+            char* input = readline("lisperer> ");
             add_history(input);
             
             /* parse input */
